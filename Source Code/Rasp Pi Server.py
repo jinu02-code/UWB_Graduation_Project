@@ -1,5 +1,4 @@
-//삼각대에 앵커 하고 나서 맵 크기 바꾼거
-
+# Server 코드 : Anchor 데이터 수집
 from flask import Flask, request, jsonify, render_template
 from datetime import datetime
 import time
@@ -30,46 +29,23 @@ def perf_log(stage, t0=None, extra=""):
 # 앵커 좌표 설정 [m]
 #
 # 기본 구조:
-# A1 ───────── A4
+# A4 ───────── A3
 # │            │
 # │            │
-# A2 ───────── A3
+# A1 ───────── A2
 #
-# 현재 설정: 실제 설치 공간 기준 약 3.24m × 3.24m 배치
-#
-# 기준 좌표계:
-#   A1 = (0.00, 0.00)         # 좌상단 기준점
-#   A4 = (3.24, 0.00)         # A1 → A4 거리: 약 3.24m
-#   A2 = (0.00, 3.16)         # A1 → A2 거리: 약 3.16m
-#   A3 = (3.16, 3.24)         # A2 → A3 거리: 약 3.16m, A4 → A3 거리: 약 3.24m
-#
-# 주요 앵커 간 거리:
-#   A1 - A4 = 3.24m           # 상단 가로 거리
-#   A1 - A2 = 3.16m           # 왼쪽 세로 거리
-#   A2 - A3 = 3.16m           # 하단 가로 거리
-#   A4 - A3 = 3.24m           # 오른쪽 세로 거리
-#
-# 대각선 거리:
-#   A1 - A3 ≈ 4.53m
-#   A2 - A4 ≈ 4.53m
-#
-# 주의:
-# - 완전한 정사각형이 아니라 실제 설치 오차를 반영하여
-#   A2는 y=3.16m, A3는 x=3.16m로 설정한다.
-# - x축: A1 → A4 방향
-# - y축: A1 → A2 방향
-# - HTML 맵은 이 좌표값을 AWS /latest의 room 정보로 받아 자동 반영한다.
 # ============================================================
 
-ROOM_WIDTH_M = 3.24
-ROOM_HEIGHT_M = 3.24
+# 1공학관 226호 기준
+ROOM_WIDTH_M = 7.20
+ROOM_HEIGHT_M = 8.10
  
 
 ANCHORS = {
-    1: (0.00, 0.00),   # A1: 기준점, 좌상단 앵커
-    4: (3.24, 0.00),   # A4: A1-A4 거리 약 3.24m, 우상단 앵커
-    2: (0.00, 3.16),   # A2: A1-A2 거리 약 3.16m, 좌하단 앵커
-    3: (3.16, 3.24),   # A3: A2-A3 거리 약 3.16m, A4-A3 거리 약 3.24m, 우하단 앵커
+    1: (0.00, 0.00),   # A1: 기준점   
+    2: (0.00, 3.16),   # A2: x축 
+    3: (3.16, 3.24),   # A3: (x, y) 
+    4: (3.24, 0.00),   # A4: y축
 }  
 
 ROOM_POLYGON = [ANCHORS[1], ANCHORS[4], ANCHORS[3], ANCHORS[2]]
@@ -84,8 +60,8 @@ MAX_DISTANCE_JUMP_M = 2.5
 
 latest = defaultdict(dict)
 latest_position = {}
-# 태그별 최신 배터리 상태 저장
-# 거리값은 앵커별로 필요하지만, 배터리값은 TAG1/TAG2별 최신값 하나만 관리하면 됨
+
+# 태그별 최신 배터리 상태 저장, 배터리값은 TAG1/TAG2별 최신값 하나만 관리하면 됨
 latest_battery = {}
 
 DEVICE_ID = "raspberrypi_uwb_01"
@@ -94,9 +70,7 @@ LATEST_JSON_PATH = Path("latest.json")
 # ============================================================
 # API Gateway 설정
 #
-# API_POSITION_URL에는 API Gateway의 POST /position 주소를 넣어야 함.
-# 예:
-# API_POSITION_URL = "https://xxxx.execute-api.us-east-2.amazonaws.com/position"
+# API_POSITION_URL에는 API Gateway의 POST /position 주소 삽입
 # ============================================================
 
 API_POSITION_URL = "https://ywfa8nwekc.execute-api.us-east-2.amazonaws.com/position"
@@ -114,16 +88,11 @@ def now_iso():
 
 # ============================================================
 # Battery handling policy
-#
-# TAG -> Anchor -> RPi 경로에서 가장 안정적으로 전달되는 값은 voltage[mV/V]이다.
-# 따라서 Anchor가 보낸 battery_percent는 사용하지 않고, RPi가 voltage로 percent를 계산한다.
+# Anchor가 보낸 battery_voltage를 Rasp Pi가 percent를 계산한다.
 #
 # Li-ion 1셀 단순 근사:
 #   4.15 V 이상 = 100%
 #   3.30 V 이하 = 0%
-#   그 사이 = 선형 보간
-#
-# 갑자기 0.25 V 이상 튀는 값은 UWB 바이트 오염/잘못된 패킷으로 보고 latest_battery를 갱신하지 않는다.
 # ============================================================
 BATTERY_EMPTY_V = 3.30
 BATTERY_FULL_V = 4.15
@@ -133,7 +102,6 @@ BATTERY_MAX_JUMP_V = 0.25
 
 
 def estimate_battery_percent_from_voltage(voltage):
-    """voltage[V]만 사용해서 배터리 잔량[%]을 계산한다."""
     try:
         v = float(voltage)
     except Exception:
@@ -152,7 +120,6 @@ def estimate_battery_percent_from_voltage(voltage):
 
 
 def is_valid_tag_battery_voltage(voltage):
-    """태그 Li-ion 1셀 기준으로 현실적인 전압 범위만 통과시킨다."""
     try:
         v = float(voltage)
     except Exception:
@@ -163,12 +130,9 @@ def is_valid_tag_battery_voltage(voltage):
 
     return BATTERY_MIN_VALID_V <= v <= BATTERY_MAX_VALID_V
 
-
+# 새 battery_voltage를 latest_battery에 저장해도 되는지 판단한다.
 def battery_acceptance_reason(tag_id, voltage):
-    """
-    새 battery_voltage를 latest_battery에 저장해도 되는지 판단한다.
-    반환: (accept: bool, reason: str)
-    """
+    
     if not is_valid_tag_battery_voltage(voltage):
         return False, "invalid_range"
 
@@ -182,13 +146,9 @@ def battery_acceptance_reason(tag_id, voltage):
 
     return True, "accepted"
 
+# A1~A4 거리값으로 최소제곱법 기반 삼변측량 수행
 def estimate_position_least_squares(distances):
-    """
-    distances: {anchor_id: distance_m}
-    return: (x, y) or None
-
-    A1~A4 거리값으로 least squares 기반 삼변측량 수행.
-    """
+    
     valid = {
         aid: float(d)
         for aid, d in distances.items()
@@ -232,12 +192,9 @@ def estimate_position_least_squares(distances):
 
     return x, y
 
-
+# 주어진 점 (x, y)이 polygon 내부 또는 경계에 있으면 내부로 인식
 def point_in_polygon(x, y, polygon):
-    """
-    주어진 점 (x, y)이 polygon 내부 또는 경계에 있으면 True 반환.
-    polygon: [(x1, y1), (x2, y2), ...]
-    """
+
     inside = False
     n = len(polygon)
 
@@ -245,7 +202,6 @@ def point_in_polygon(x, y, polygon):
         x1, y1 = polygon[i]
         x2, y2 = polygon[(i + 1) % n]
 
-        # 경계선 위에 있는 경우 내부로 처리
         cross = (x - x1) * (y2 - y1) - (y - y1) * (x2 - x1)
         if abs(cross) < 1e-9:
             if min(x1, x2) - 1e-9 <= x <= max(x1, x2) + 1e-9 and min(y1, y2) - 1e-9 <= y <= max(y1, y2) + 1e-9:
@@ -259,11 +215,9 @@ def point_in_polygon(x, y, polygon):
     return inside
 
 
+# tag_id별 최신 A1~A4 거리값을 모아 위치 계산
 def compute_position_for_tag(tag_id):
-    """
-    tag_id별 최신 A1~A4 거리값을 모아 위치 계산.
-    TAG1, TAG2 모두 같은 함수로 계산됨.
-    """
+    
     _t0_compute = perf_ms()
     if tag_id not in latest:
         return None
@@ -310,8 +264,7 @@ def compute_position_for_tag(tag_id):
     x_clamped = min(max(x, 0.0), ROOM_WIDTH_M)
     y_clamped = min(max(y, 0.0), ROOM_HEIGHT_M)
 
-    # 원본 추정 좌표(x, y)를 기준으로 방 이탈 여부를 판단한다.
-    # 화면 표시는 x_clamped/y_clamped를 사용하지만, 이탈 판단은 clamping 전 좌표를 사용해야 한다.
+    # 원본 추정 좌표(x, y)를 기준으로 방 이탈 여부를 판단
     out_of_room = not point_in_polygon(x, y, ROOM_POLYGON)
 
     latest_position[tag_id] = {
@@ -330,15 +283,9 @@ def compute_position_for_tag(tag_id):
     perf_log('compute_position_for_tag OK', _t0_compute, f'TAG{tag_id} fresh={len(distances)}')
     return latest_position[tag_id]
 
-
+# S3 latest.json / DynamoDB 저장
 def build_dynamodb_style_payload():
-    """
-    S3 latest.json / DynamoDB / IoT Core 확장까지 고려한 공통 payload 생성.
 
-    - S3: latest.json 파일로 업로드해서 웹페이지가 records 배열을 읽으면 됨
-    - DynamoDB: records 배열 안의 각 항목을 tag_id + timestamp 기준으로 한 줄씩 저장하면 됨
-    - IoT Core: 이 payload 전체를 publish하거나 records를 개별 publish해도 됨
-    """
     payload_timestamp = now_iso()
 
     payload = {
@@ -419,12 +366,9 @@ def build_dynamodb_style_payload():
 
     return payload
 
-
+# latest.json 자동 저장
 def save_latest_json():
-    """
-    Raspberry Pi 로컬 폴더에 latest.json 자동 저장.
-    나중에 이 파일을 S3에 업로드하면 외부 웹페이지에서 그대로 읽을 수 있음.
-    """
+
     _t0 = perf_ms()
     payload = build_dynamodb_style_payload()
     perf_log("build_dynamodb_style_payload", _t0)
@@ -437,11 +381,9 @@ def save_latest_json():
     perf_log("save_latest_json total", _t0)
     return payload
 
-
+#   Raspberry Pi에서 계산한 위치 payload를 API Gateway의 POST /position으로 전송
 def post_payload_to_api(payload):
-    """
-    Raspberry Pi에서 계산한 위치 payload를 API Gateway의 POST /position으로 전송.
-    """
+    
     global last_api_post_time, last_history_save_time
     _t0_api = perf_ms()
 
@@ -477,23 +419,11 @@ def post_payload_to_api(payload):
 @app.route("/uwb", methods=["POST"])
 def receive_uwb():
     _t0_route = perf_ms()
-    """
-    앵커 ESP32가 HTTP POST로 거리값을 보내는 주소.
-    예시 JSON:
-    {
-      "tag_id": 1,
-      "anchor_id": 4,
-      "seq": 107,
-      "distance": 2.810,
-      "avg_distance": 2.800
-    }
-    """
+
     _t_json = perf_ms()
     data = request.get_json(silent=True)
     perf_log('Flask request.get_json', _t_json)
 
-    # DEBUG: Anchor가 실제로 battery 필드를 보내는지 확인용
-    # 정상 예: {'tag_id':2, 'anchor_id':1, ..., 'battery_voltage':3.91, 'battery_percent':82}
     print(f"RAW /uwb data: {data}")
 
     if data is None:
@@ -508,8 +438,6 @@ def receive_uwb():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
-    # Anchor가 보낸 battery_voltage만 신뢰한다.
-    # battery_percent는 받더라도 저장하지 않고 로그에만 남긴다.
     battery_voltage_raw = data.get("battery_voltage")
     battery_mV_raw = data.get("battery_mV", data.get("battery_mv", data.get("battery_voltage_mV")))
     battery_percent_raw = data.get("battery_percent")
@@ -574,8 +502,6 @@ def receive_uwb():
 
     latest[tag_id][anchor_id] = item
 
-    # 배터리값은 앵커별이 아니라 태그별 최신값으로 저장한다.
-    # percent는 Anchor가 보낸 값을 쓰지 않고, RPi에서 voltage 기반으로 계산한 값을 저장한다.
     if battery_accept and battery_voltage is not None and battery_percent is not None:
         latest_battery[tag_id] = {
             "battery_voltage": battery_voltage,
@@ -648,10 +574,7 @@ def receive_uwb():
 @app.route("/latest", methods=["GET"])
 def get_latest():
     _t0_latest = perf_ms()
-    """
-    브라우저/HTML이 최신 거리값과 계산된 좌표를 확인하는 주소.
-    TAG1, TAG2 모두 JSON으로 반환.
-    """
+
     output = {}
 
     for tag_id in list(latest.keys()):
@@ -675,10 +598,7 @@ def get_latest():
 
 @app.route("/latest-json", methods=["GET"])
 def get_latest_json_payload():
-    """
-    latest.json과 같은 DynamoDB-style records 구조를 브라우저에서 바로 확인하는 주소.
-    S3에 올릴 JSON 구조를 미리 확인할 때 사용.
-    """
+    
     payload = save_latest_json()
     return jsonify(payload)
 
