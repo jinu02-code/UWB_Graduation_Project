@@ -1,4 +1,4 @@
-// DWM3000 기반 TAG1 HYBRID_RANDOM 코드: motion interrupt 발생 시 A1/A2/A3/A4를 순차 ranging
+// TAG1 코드: motion interrupt 발생 시 A1/A2/A3/A4를 순차 ranging
 #include <Wire.h>     // I2C 통신용
 #include <SPI.h>      // ESP32와 DW3000 간 SPI 통신
 #include <dw3000.h>   // DWM3000 UWB 제어
@@ -46,8 +46,6 @@
 #define MAX_CONSEC_FAILS         3
 
 // motion wake / sleep behavior
-/* #define QUIET_TO_SLEEP_MS 3000
-#define MAX_AWAKE_MS 12000 나중에 이렇게 줄이면 깨어있는 시간 줄음*/
 #define RESP_TIMEOUT_MS       350   // RESP 수신 대기 시간
 #define QUIET_TO_SLEEP_MS    5000   // 마지막 움직임 후 sleep 복귀 시간
 #define MAX_AWAKE_MS        15000   // 최대 awake 시간
@@ -194,12 +192,6 @@ int voltageToPercent(float voltage) {
   return (int)(((voltage - 3.30) / (4.15 - 3.30)) * 100.0);
 }
 
-/* 전압만 반환 (현재 사용안하나?)
-float readBatteryVoltage() {
-  BatteryReading b = readBattery();
-  return b.batteryVoltage;
-}*/
-
 // OLED 준비
 void initOLED() {
   OLEDWire.begin(OLED_SDA_PIN, OLED_SCL_PIN, 100000);
@@ -270,7 +262,6 @@ void printBatteryStatus() {
 
   updateBatteryOLED(b);   // OLED 화면 표시
 }
-
 
 // min~max 랜덤값 반환으로 충돌 완화 대기시간 생성
 unsigned long randBetween(unsigned long min_v, unsigned long max_v) {
