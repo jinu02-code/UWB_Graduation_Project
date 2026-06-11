@@ -7,7 +7,7 @@
 #include <Adafruit_GFX.h>       // OLED 그래픽 기본 라이브러리
 #include <Adafruit_SSD1306.h>   // SSD1306 OLED 제어
 
-// ===== ESP32 <-> DWM3000 핀 연결 =====
+// ===== ESP32 <-> DWM3000 핀 연결 =====d
 #define PIN_SCK   18  // SPI Clock 핀
 #define PIN_MISO  19  // SPI MISO 핀
 #define PIN_MOSI  23  // SPI MOSI 핀
