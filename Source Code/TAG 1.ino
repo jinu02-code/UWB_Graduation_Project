@@ -30,11 +30,6 @@
 
 #define TAG_PHASE_OFFSET_MS
 
-/*
-#define TAG_SLOT_BASE 0
-#define FRAME_MS 3000  // HYBRID_RANDOM에서는 사용하지 않음
-#define SLOT_MS 500    // HYBRID_RANDOM에서는 사용하지 않음*/
-
 // 랜덤 백오프 범위(ms)
 #define PRE_TX_BACKOFF_MIN  10   // 송신 전 랜덤 대기 최소 (충돌완화)
 #define PRE_TX_BACKOFF_MAX  80   // 송신 전 랜덤 대기 최대 (커지면 충돌 감소, 지연 증가)
